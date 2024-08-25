@@ -35,7 +35,7 @@ def main():
                     left_speed = env.max_backward_speed
                     right_speed = -env.max_backward_speed
             out = env.step(np.array([left_speed, right_speed]))
-            print(out[1])
+            print(out[0])
             if out[3]:
                 env.reset()
             time.sleep(0.1)  # Adjust the sleep time as needed

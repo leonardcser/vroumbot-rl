@@ -27,9 +27,9 @@ class RobotParticleEnv(gym.Env):
         self.min_max_forward_speed = 20.0
         self.max_max_forward_speed = 20.0
 
-        self.max_backward_speed = 5.0
-        self.min_max_backward_speed = 5.0
-        self.max_max_backward_speed = 5.0
+        self.max_backward_speed = 10.0
+        self.min_max_backward_speed = 10.0
+        self.max_max_backward_speed = 10.0
 
         # Robots and particles settings
         self.min_robots = 1
@@ -38,7 +38,7 @@ class RobotParticleEnv(gym.Env):
         self.max_robot_radius = 20
         self.robot_capture_angle = 45
 
-        self.min_particles = 2
+        self.min_particles = 5
         self.max_particles = 5
         self.min_particle_radius = 10
         self.max_particle_radius = 30
@@ -62,8 +62,9 @@ class RobotParticleEnv(gym.Env):
             low=0,
             high=1,
             shape=(
-                # 7 * robots: (position (x, y), radius, angle, leftSpeed, rightSpeed, active)
-                self.max_robots * 7
+                # 8 * robots: (position (x, y), radius, angle, leftSpeed,
+                #              rightSpeed, colliding, active)
+                self.max_robots * 8
                 # 4: particles (position (x, y), radius, active)
                 + self.max_particles * 4
                 # 3: command_time_interval, max_forward_speed, max_backward_speed
@@ -96,30 +97,31 @@ class RobotParticleEnv(gym.Env):
             reward = 1.0
             self.done = True
         elif particles_eaten > 0:
-            reward = 1.0
+            reward = 0.5
         else:
-            distances_robot_particle = []
-            for robot in self.state["robots"]:
-                if not robot["active"]:
-                    continue
-                for particle in self.state["particles"]:
-                    if not particle["active"]:
-                        continue
-                    distances_robot_particle.append(
-                        math.sqrt(
-                            pow(robot["position"]["x"] - particle["position"]["x"], 2)
-                            + pow(robot["position"]["y"] - particle["position"]["y"], 2)
-                        )
-                    )
-            reward = -(
-                (
-                    min(distances_robot_particle)
-                    / math.sqrt(pow(self.world_width, 2) + pow(self.world_height, 2))
-                )
-                / 10
-                if distances_robot_particle
-                else 0
-            )
+            reward = -0.005
+            # distances_robot_particle = []
+            # for robot in self.state["robots"]:
+            #     if not robot["active"]:
+            #         continue
+            #     for particle in self.state["particles"]:
+            #         if not particle["active"]:
+            #             continue
+            #         distances_robot_particle.append(
+            #             math.sqrt(
+            #                 pow(robot["position"]["x"] - particle["position"]["x"], 2)
+            #                 + pow(robot["position"]["y"] - particle["position"]["y"], 2)
+            #             )
+            #         )
+            # reward = -(
+            #     (
+            #         min(distances_robot_particle)
+            #         / math.sqrt(pow(self.world_width, 2) + pow(self.world_height, 2))
+            #     )
+            #     / 10
+            #     if distances_robot_particle
+            #     else 0
+            # )
 
         # Terminated
         terminated = False
@@ -254,6 +256,7 @@ class RobotParticleEnv(gym.Env):
                     },
                     "radius": radius,
                     "score": 0.0,
+                    "colliding": False,
                     "active": 1 if i < num_robots else 0,
                 }
             )
@@ -312,7 +315,7 @@ class RobotParticleEnv(gym.Env):
     def _get_observations(self):
         obs = np.zeros(self.observation_space.shape, dtype=np.float32)
         for i, robot in enumerate(self.state["robots"]):
-            offset = i * 7
+            offset = i * 8
             obs[offset] = self._normalize(robot["position"]["x"], 0, self.world_width)
             obs[offset + 1] = self._normalize(
                 robot["position"]["y"], 0, self.world_height
@@ -327,10 +330,11 @@ class RobotParticleEnv(gym.Env):
             obs[offset + 5] = self._normalize(
                 robot["rightSpeed"], -self.max_backward_speed, self.max_forward_speed
             )
-            obs[offset + 6] = robot["active"]
+            obs[offset + 6] = robot["colliding"]
+            obs[offset + 7] = robot["active"]
 
         for i, particle in enumerate(self.state["particles"]):
-            offset = self.max_robots * 7 + i * 4
+            offset = self.max_robots * 8 + i * 4
             obs[offset] = self._normalize(
                 particle["position"]["x"], 0, self.world_width
             )
@@ -342,7 +346,7 @@ class RobotParticleEnv(gym.Env):
             )
             obs[offset + 3] = particle["active"]
 
-        offset = self.max_robots * 7 + self.max_particles * 4
+        offset = self.max_robots * 8 + self.max_particles * 4
         obs[offset] = self._normalize(
             self.command_time_interval,
             self.min_command_time_interval,
@@ -369,8 +373,9 @@ class RobotParticleEnv(gym.Env):
 
     def _update(self) -> int:
         elapsed_time = 0
+        particles_eaten = 0
         while elapsed_time < self.command_time_interval:
-            particles_eaten = self._check_collisions()
+            particles_eaten += self._check_collisions()
             self._update_robots()
             # self._update_particles()
             self.state["time"] += self.dt
@@ -470,12 +475,14 @@ class RobotParticleEnv(gym.Env):
     def _check_collisions(self) -> int:
         particles_eaten = 0
         for i, robot in enumerate(self.state["robots"]):
+            robot["colliding"] = False
             if not robot["active"]:
                 continue
             for j, particle in enumerate(self.state["particles"]):
                 if not particle["active"]:
                     continue
                 if self._is_collision(robot, particle):
+                    robot["colliding"] = True
                     # Check if the robot is capturing the particle
                     # Robots has angle in degrees
                     angle_robot_particle = (
@@ -506,6 +513,8 @@ class RobotParticleEnv(gym.Env):
                 if not other_robot["active"]:
                     continue
                 if self._is_collision(robot, other_robot):
+                    robot["colliding"] = True
+                    other_robot["colliding"] = True
                     robot_next = deepcopy(robot)
                     other_robot_next = deepcopy(other_robot)
                     self._update_robot(robot_next)
