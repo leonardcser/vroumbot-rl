@@ -1,14 +1,14 @@
 import math
 from copy import deepcopy
 
-import gym
+import gymnasium as gym
 import numpy as np
 import pygame
-from gym import spaces
+from gymnasium import spaces
 
 
 class RobotParticleEnv(gym.Env):
-    def __init__(self):
+    def __init__(self, env_config=None):
         super(RobotParticleEnv, self).__init__()
 
         # Rendering settings
@@ -36,9 +36,10 @@ class RobotParticleEnv(gym.Env):
         self.max_robots = 1
         self.min_robot_radius = 10
         self.max_robot_radius = 20
+        self.robot_capture_angle = 45
 
-        self.min_particles = 5
-        self.max_particles = 10
+        self.min_particles = 2
+        self.max_particles = 5
         self.min_particle_radius = 10
         self.max_particle_radius = 30
 
@@ -49,6 +50,7 @@ class RobotParticleEnv(gym.Env):
         self.done = False
 
         # Define action and observation space
+
         self.action_space = spaces.Box(
             low=-self.max_backward_speed,
             high=self.max_forward_speed,
@@ -56,84 +58,22 @@ class RobotParticleEnv(gym.Env):
             dtype=np.float32,
         )
 
-        # Observation space for each robot
-        robot_obs_space = spaces.Dict(
-            {
-                "position": spaces.Box(
-                    low=0,
-                    high=max(self.world_width, self.world_height),
-                    shape=(2,),
-                    dtype=np.float32,
-                ),
-                "radius": spaces.Box(
-                    low=self.min_robot_radius,
-                    high=self.max_robot_radius,
-                    shape=(1,),
-                    dtype=np.float32,
-                ),
-                "angle": spaces.Box(low=0, high=360, shape=(1,), dtype=np.float32),
-                "leftSpeed": spaces.Box(
-                    low=-self.max_backward_speed,
-                    high=self.max_forward_speed,
-                    shape=(1,),
-                    dtype=np.float32,
-                ),
-                "rightSpeed": spaces.Box(
-                    low=-self.max_backward_speed,
-                    high=self.max_forward_speed,
-                    shape=(1,),
-                    dtype=np.float32,
-                ),
-                "active": spaces.Discrete(2),  # 0 for inactive, 1 for active
-            }
-        )
-
-        particle_obs_space = spaces.Dict(
-            {
-                "position": spaces.Box(
-                    low=self.min_particle_radius,
-                    high=max(self.world_width, self.world_height)
-                    - self.min_particle_radius,
-                    shape=(2,),
-                    dtype=np.float32,
-                ),
-                "radius": spaces.Box(
-                    low=self.min_particle_radius,
-                    high=self.max_particle_radius,
-                    shape=(1,),
-                    dtype=np.float32,
-                ),
-                # "explosionTimes": spaces.Sequence(
-                #     spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32)
-                # ),
-            }
-        )
-
-        self.observation_space = spaces.Dict(
-            {
-                "robots": spaces.Tuple((robot_obs_space,) * self.max_robots),
-                "particles": spaces.Tuple((particle_obs_space,) * self.max_particles),
-                "command_time_interval": spaces.Box(
-                    low=self.min_command_time_interval,
-                    high=self.max_command_time_interval,
-                    shape=(1,),
-                    dtype=np.float32,
-                ),
-                "max_forward_speed": spaces.Box(
-                    low=self.min_max_forward_speed,
-                    high=self.max_max_forward_speed,
-                    shape=(1,),
-                    dtype=np.float32,
-                ),
-                "max_backward_speed": spaces.Box(
-                    low=self.min_max_backward_speed,
-                    high=self.max_max_backward_speed,
-                    shape=(1,),
-                    dtype=np.float32,
-                ),
-                "num_active_robots": spaces.Discrete(self.max_robots + 1),
-                "num_active_particles": spaces.Discrete(self.max_particles + 1),
-            }
+        self.observation_space = spaces.Box(
+            low=0,
+            high=1,
+            shape=(
+                # 7 * robots: (position (x, y), radius, angle, leftSpeed, rightSpeed, active)
+                self.max_robots * 7
+                # 4: particles (position (x, y), radius, active)
+                + self.max_particles * 4
+                # 3: command_time_interval, max_forward_speed, max_backward_speed
+                + 3
+                # 1 * robots: num_active_robots
+                + (self.max_robots + 1)
+                # 1 * particules: num_active_particles
+                + (self.max_particles + 1),
+            ),
+            dtype=np.float32,
         )
 
     def step(self, actions):
@@ -144,24 +84,52 @@ class RobotParticleEnv(gym.Env):
                 if math.isclose(robot["leftSpeed"], robot["rightSpeed"], rel_tol=1e-5):
                     robot["leftSpeed"] = robot["rightSpeed"]
 
-        self._update()
+        particles_eaten = self._update()
 
-        if self.state["time"] >= self.max_episode_time:
-            self.done = True
-
+        # Observations
         observations = self._get_observations()
-        assert observations.keys() == self.observation_space.spaces.keys()
-        if not self.done:
-            rewards = [
-                robot["score"] for robot in self.state["robots"] if robot["active"]
-            ]
+        assert not np.any(np.isnan(observations))
+        # Rewards
+        if self.done:
+            reward = -1.0
+        elif len([p for p in self.state["particles"] if p["active"]]) == 0:
+            reward = 1.0
+            self.done = True
+        elif particles_eaten > 0:
+            reward = 1.0
         else:
-            rewards = [-100.0] * self.max_robots
+            distances_robot_particle = []
+            for robot in self.state["robots"]:
+                if not robot["active"]:
+                    continue
+                for particle in self.state["particles"]:
+                    if not particle["active"]:
+                        continue
+                    distances_robot_particle.append(
+                        math.sqrt(
+                            pow(robot["position"]["x"] - particle["position"]["x"], 2)
+                            + pow(robot["position"]["y"] - particle["position"]["y"], 2)
+                        )
+                    )
+            reward = -(
+                (
+                    min(distances_robot_particle)
+                    / math.sqrt(pow(self.world_width, 2) + pow(self.world_height, 2))
+                )
+                / 10
+                if distances_robot_particle
+                else 0
+            )
+
+        # Terminated
+        terminated = False
+        if self.state["time"] >= self.max_episode_time:
+            terminated = True
+        # Info
         info = {}
+        return observations, reward, terminated, self.done, info
 
-        return observations, rewards, self.done, info
-
-    def reset(self):
+    def reset(self, *, seed=None, options=None):
         # Reset the environment to its initial state
         self.state = self._get_initial_state()
         self.command_time_interval = np.random.uniform(
@@ -174,7 +142,7 @@ class RobotParticleEnv(gym.Env):
             self.min_max_backward_speed, self.max_max_backward_speed
         )
         self.done = False
-        return self._get_observations()
+        return self._get_observations(), {}
 
     def render(self, mode="human"):
         if self.viewer is None:
@@ -194,7 +162,7 @@ class RobotParticleEnv(gym.Env):
                 continue
             pygame.draw.circle(
                 self.viewer,
-                (0, 0, 255),
+                (100, 100, 255),
                 (int(robot["position"]["x"]), int(robot["position"]["y"])),
                 int(robot["radius"]),
             )
@@ -231,7 +199,7 @@ class RobotParticleEnv(gym.Env):
                 continue
             pygame.draw.circle(
                 self.viewer,
-                (0, 255, 0),
+                (255, 150, 150),
                 (int(particle["position"]["x"]), int(particle["position"]["y"])),
                 int(particle["radius"]),
             )
@@ -272,8 +240,7 @@ class RobotParticleEnv(gym.Env):
             robots.append(
                 {
                     "angle": np.random.uniform(0, 360),
-                    # TODO: Randomize capture angle
-                    "captureAngle": 45.0,
+                    "captureAngle": self.robot_capture_angle,
                     "id": i,
                     "leftSpeed": np.random.uniform(
                         -self.max_backward_speed, self.max_forward_speed
@@ -318,7 +285,7 @@ class RobotParticleEnv(gym.Env):
                         "y": y,
                     },
                     "radius": radius,
-                    "explosionTimes": [[self.max_episode_time]],
+                    "explosionTimes": [[self.max_episode_time + 1]],
                     "active": 1 if i < num_particles else 0,
                 }
             )
@@ -333,123 +300,83 @@ class RobotParticleEnv(gym.Env):
             "num_active_particles": num_particles,
         }
 
-    def _normalize(self, value, obs_space):
-        low = obs_space.low
-        high = obs_space.high
+    def _normalize(self, value: float, low: float, high: float):
         # check if low values are same to high to avoid division by zero
-        if (low == high).all():
+        if low == high:
             return 1.0
         return (value - low) / (high - low)
 
-    def _get_observations(self):
-        obs_space = self.observation_space
-        robot_obs_space = obs_space["robots"][0].spaces
-        particle_obs_space = obs_space["particles"][0].spaces
-        return {
-            "robots": [
-                {
-                    "position": np.array(
-                        [
-                            self._normalize(
-                                robot["position"]["x"], robot_obs_space["position"]
-                            ),
-                            self._normalize(
-                                robot["position"]["y"], robot_obs_space["position"]
-                            ),
-                        ],
-                        dtype=np.float32,
-                    ),
-                    "radius": np.array(
-                        [self._normalize(robot["radius"], robot_obs_space["radius"])],
-                        dtype=np.float32,
-                    ),
-                    "angle": np.array(
-                        [self._normalize(robot["angle"], robot_obs_space["angle"])],
-                        dtype=np.float32,
-                    ),
-                    "leftSpeed": np.array(
-                        [
-                            self._normalize(
-                                robot["leftSpeed"], robot_obs_space["leftSpeed"]
-                            )
-                        ],
-                        dtype=np.float32,
-                    ),
-                    "rightSpeed": np.array(
-                        [
-                            self._normalize(
-                                robot["rightSpeed"], robot_obs_space["rightSpeed"]
-                            )
-                        ],
-                        dtype=np.float32,
-                    ),
-                    "active": robot["active"],
-                }
-                for robot in self.state["robots"]
-            ],
-            "particles": [
-                {
-                    "position": np.array(
-                        [
-                            self._normalize(
-                                particle["position"]["x"],
-                                particle_obs_space["position"],
-                            ),
-                            self._normalize(
-                                particle["position"]["y"],
-                                particle_obs_space["position"],
-                            ),
-                        ],
-                        dtype=np.float32,
-                    ),
-                    "radius": np.array(
-                        [
-                            self._normalize(
-                                particle["radius"], particle_obs_space["radius"]
-                            )
-                        ],
-                        dtype=np.float32,
-                    ),
-                    # "explosionTimes": particle["explosionTimes"],
-                }
-                for particle in self.state["particles"]
-            ],
-            "command_time_interval": np.array(
-                [
-                    self._normalize(
-                        self.command_time_interval, obs_space["command_time_interval"]
-                    )
-                ],
-                dtype=np.float32,
-            ),
-            "max_forward_speed": np.array(
-                [
-                    self._normalize(
-                        self.max_forward_speed, obs_space["max_forward_speed"]
-                    )
-                ],
-                dtype=np.float32,
-            ),
-            "max_backward_speed": np.array(
-                [
-                    self._normalize(
-                        self.max_backward_speed, obs_space["max_backward_speed"]
-                    )
-                ],
-                dtype=np.float32,
-            ),
-            "num_active_robots": self.state["num_active_robots"],
-            "num_active_particles": self.state["num_active_particles"],
-        }
+    def _one_hot(self, value, num_classes):
+        return np.eye(num_classes)[value]
 
-    def _update(self):
+    def _get_observations(self):
+        obs = np.zeros(self.observation_space.shape, dtype=np.float32)
+        for i, robot in enumerate(self.state["robots"]):
+            offset = i * 7
+            obs[offset] = self._normalize(robot["position"]["x"], 0, self.world_width)
+            obs[offset + 1] = self._normalize(
+                robot["position"]["y"], 0, self.world_height
+            )
+            obs[offset + 2] = self._normalize(
+                robot["radius"], self.min_robot_radius, self.max_robot_radius
+            )
+            obs[offset + 3] = self._normalize(robot["angle"], 0, 360)
+            obs[offset + 4] = self._normalize(
+                robot["leftSpeed"], -self.max_backward_speed, self.max_forward_speed
+            )
+            obs[offset + 5] = self._normalize(
+                robot["rightSpeed"], -self.max_backward_speed, self.max_forward_speed
+            )
+            obs[offset + 6] = robot["active"]
+
+        for i, particle in enumerate(self.state["particles"]):
+            offset = self.max_robots * 7 + i * 4
+            obs[offset] = self._normalize(
+                particle["position"]["x"], 0, self.world_width
+            )
+            obs[offset + 1] = self._normalize(
+                particle["position"]["y"], 0, self.world_height
+            )
+            obs[offset + 2] = self._normalize(
+                particle["radius"], self.min_particle_radius, self.max_particle_radius
+            )
+            obs[offset + 3] = particle["active"]
+
+        offset = self.max_robots * 7 + self.max_particles * 4
+        obs[offset] = self._normalize(
+            self.command_time_interval,
+            self.min_command_time_interval,
+            self.max_command_time_interval,
+        )
+        obs[offset + 1] = self._normalize(
+            self.max_forward_speed,
+            self.min_max_forward_speed,
+            self.max_max_forward_speed,
+        )
+        obs[offset + 2] = self._normalize(
+            self.max_backward_speed,
+            self.min_max_backward_speed,
+            self.max_max_backward_speed,
+        )
+        obs[offset + 3 : offset + 3 + self.max_robots + 1] = self._one_hot(
+            self.state["num_active_robots"], self.max_robots + 1
+        )
+        offset = offset + 3 + self.max_robots + 1
+        obs[offset:] = self._one_hot(
+            self.state["num_active_particles"], self.max_particles + 1
+        )
+        return obs
+
+    def _update(self) -> int:
         elapsed_time = 0
         while elapsed_time < self.command_time_interval:
-            self._check_collisions()
+            particles_eaten = self._check_collisions()
             self._update_robots()
             # self._update_particles()
             self.state["time"] += self.dt
             elapsed_time += self.dt
+
+        return particles_eaten
 
     def _update_robots(self):
         for robot in self.state["robots"]:
@@ -476,6 +403,7 @@ class RobotParticleEnv(gym.Env):
             # Move the robot straight
             robot["position"]["x"] += vt * self.dt * math.cos(angle_rad)
             robot["position"]["y"] += vt * self.dt * math.sin(angle_rad)
+            robot["angle"] = robot["angle"] % 360
         elif leftSpeed != -rightSpeed:
             R = radius * (leftSpeed + rightSpeed) / (leftSpeed - rightSpeed)
             omega = vt / R
@@ -539,7 +467,8 @@ class RobotParticleEnv(gym.Env):
 
         self.state["particles"].pop(i)
 
-    def _check_collisions(self):
+    def _check_collisions(self) -> int:
+        particles_eaten = 0
         for i, robot in enumerate(self.state["robots"]):
             if not robot["active"]:
                 continue
@@ -547,21 +476,26 @@ class RobotParticleEnv(gym.Env):
                 if not particle["active"]:
                     continue
                 if self._is_collision(robot, particle):
-                    # Check if capture angle is in the direction of the particle
-                    if (
-                        abs(
+                    # Check if the robot is capturing the particle
+                    # Robots has angle in degrees
+                    angle_robot_particle = (
+                        math.degrees(
                             math.atan2(
                                 particle["position"]["y"] - robot["position"]["y"],
                                 particle["position"]["x"] - robot["position"]["x"],
                             )
-                            - math.radians(robot["angle"])
                         )
-                        < math.radians(robot["captureAngle"]) / 2
-                    ):
+                        + 360
+                    ) % 360
+                    angle_diff = abs(angle_robot_particle - robot["angle"])
+                    angle_diff = min(angle_diff, 360 - angle_diff)
+                    if angle_diff <= robot["captureAngle"]:
                         particule = self.state["particles"].pop(j)
                         self.state["robots"][i]["score"] += particule["radius"]
+                        particles_eaten += 1
                     else:
                         robot_next = deepcopy(robot)
+                        self._update_robot(robot_next)
                         self._update_robot(robot_next)
                         if self._is_collision(robot_next, particle):
                             if robot["leftSpeed"] + robot["rightSpeed"] != 0:
@@ -575,6 +509,8 @@ class RobotParticleEnv(gym.Env):
                     robot_next = deepcopy(robot)
                     other_robot_next = deepcopy(other_robot)
                     self._update_robot(robot_next)
+                    self._update_robot(robot_next)
+                    self._update_robot(other_robot_next)
                     self._update_robot(other_robot_next)
                     if self._is_collision(robot_next, other_robot_next):
                         if robot["leftSpeed"] + robot["rightSpeed"] != 0:
@@ -583,6 +519,7 @@ class RobotParticleEnv(gym.Env):
                         if other_robot["leftSpeed"] + other_robot["rightSpeed"] != 0:
                             other_robot["leftSpeed"] = 0
                             other_robot["rightSpeed"] = 0
+        return particles_eaten
 
     def _is_collision(self, cicle1, circle2):
         if (
