@@ -1,6 +1,5 @@
 import os
 import tempfile
-import time
 from argparse import ArgumentParser
 from datetime import datetime
 from pathlib import Path
@@ -10,7 +9,7 @@ from ray.rllib.algorithms.algorithm import Algorithm
 from ray.rllib.algorithms.ppo import PPOConfig
 from ray.tune.logger import UnifiedLogger
 
-from robot_particle_env import RobotParticleEnv
+from robot_particle_env import StackedRobotParticleEnv
 
 checkpoint_path = Path.cwd() / "checkpoint"
 
@@ -35,16 +34,16 @@ def train(resume: bool):
     else:
         config = (
             PPOConfig()
-            .environment(RobotParticleEnv)
+            .environment(StackedRobotParticleEnv)
             .env_runners(num_env_runners=2)
             .framework("torch")
             .training(
                 gamma=0.9,
-                lr=0.00025,
+                lr=0.0001,
                 kl_coeff=0.2,
-                entropy_coeff=0.001,
+                entropy_coeff=0.01,
                 model={
-                    "fcnet_hiddens": [256, 256, 512, 512],
+                    "fcnet_hiddens": [256, 256, 512, 512, 1024],
                     "fcnet_activation": "relu",
                 },
             )
@@ -56,7 +55,7 @@ def train(resume: bool):
 
     checkpoint_path.mkdir(exist_ok=True)
     try:
-        for i in range(100):
+        for i in range(500):
             result = algo.train()
             result.pop("config")
             # print important metrics
@@ -82,7 +81,7 @@ def train(resume: bool):
 def tune():
     config = (
         PPOConfig()
-        .environment(RobotParticleEnv)
+        .environment(StackedRobotParticleEnv)
         .training(
             gamma=0.9,
             lr=ray.tune.grid_search([0.001, 0.0001, 0.00001]),
@@ -118,16 +117,15 @@ def tune():
 def run():
     algo = Algorithm.from_checkpoint(checkpoint_path)
 
-    env = RobotParticleEnv()
+    env = StackedRobotParticleEnv(env_config=dict(render_mode="human"))
     obs, _ = env.reset()
 
     while True:
         action = algo.compute_single_action(obs)
         obs, reward, terminated, done, info = env.step(action)
-        env.render()
+        print("Reward:", reward)
         if done or terminated:
             obs, _ = env.reset()
-        time.sleep(0.05)
 
 
 def main():
