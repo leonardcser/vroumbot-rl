@@ -3,14 +3,13 @@ import tempfile
 from argparse import ArgumentParser
 from datetime import datetime
 from pathlib import Path
-from pprint import pprint
 
 import ray
 from ray.rllib.algorithms.algorithm import Algorithm
 from ray.rllib.algorithms.ppo import PPOConfig
 from ray.tune.logger import UnifiedLogger
 
-from robot_particle_env import RobotParticleEnv, StackedRobotParticleEnv
+from robot_particle_env import RobotParticleEnv
 
 checkpoint_path = Path.cwd() / "checkpoint"
 
@@ -59,13 +58,13 @@ def train(resume: bool):
         for i in range(500):
             result = algo.train()
             result.pop("config")
-            pprint(result)
-            # print("-" * 50)
-            # print("Iteration:", i)
-            # print("Mean Length:", metrics["episode_len_mean"])
-            # print("Min Reward:", metrics["episode_reward_min"])
-            # print("Max Reward:", metrics["episode_reward_max"])
-            # print("Mean Reward:", metrics["episode_reward_mean"])
+            metrics = result["env_runners"]
+            print("-" * 50)
+            print("Iteration:", i)
+            print("Mean Length:", metrics["episode_len_mean"])
+            print("Min Reward:", metrics["episode_reward_min"])
+            print("Max Reward:", metrics["episode_reward_max"])
+            print("Mean Reward:", metrics["episode_reward_mean"])
 
             if i % 10 == 0:
                 algo.save_checkpoint(checkpoint_path)
