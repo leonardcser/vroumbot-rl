@@ -3,13 +3,14 @@ import tempfile
 from argparse import ArgumentParser
 from datetime import datetime
 from pathlib import Path
+from pprint import pprint
 
 import ray
 from ray.rllib.algorithms.algorithm import Algorithm
 from ray.rllib.algorithms.ppo import PPOConfig
 from ray.tune.logger import UnifiedLogger
 
-from robot_particle_env import StackedRobotParticleEnv
+from robot_particle_env import RobotParticleEnv, StackedRobotParticleEnv
 
 checkpoint_path = Path.cwd() / "checkpoint"
 
@@ -34,16 +35,16 @@ def train(resume: bool):
     else:
         config = (
             PPOConfig()
-            .environment(StackedRobotParticleEnv)
-            .env_runners(num_env_runners=2)
+            .environment(RobotParticleEnv)
+            .env_runners(num_env_runners=1)
             .framework("torch")
             .training(
-                gamma=0.9,
-                lr=0.0001,
+                gamma=0.99,
+                lr=0.00025,
                 kl_coeff=0.2,
-                entropy_coeff=0.01,
+                entropy_coeff=0.001,
                 model={
-                    "fcnet_hiddens": [256, 256, 512, 512, 1024],
+                    "fcnet_hiddens": [256, 256, 512, 512],
                     "fcnet_activation": "relu",
                 },
             )
@@ -58,14 +59,13 @@ def train(resume: bool):
         for i in range(500):
             result = algo.train()
             result.pop("config")
-            # print important metrics
-            metrics = result["env_runners"]
-            print("-" * 50)
-            print("Iteration:", i)
-            print("Mean Length:", metrics["episode_len_mean"])
-            print("Min Reward:", metrics["episode_reward_min"])
-            print("Max Reward:", metrics["episode_reward_max"])
-            print("Mean Reward:", metrics["episode_reward_mean"])
+            pprint(result)
+            # print("-" * 50)
+            # print("Iteration:", i)
+            # print("Mean Length:", metrics["episode_len_mean"])
+            # print("Min Reward:", metrics["episode_reward_min"])
+            # print("Max Reward:", metrics["episode_reward_max"])
+            # print("Mean Reward:", metrics["episode_reward_mean"])
 
             if i % 10 == 0:
                 algo.save_checkpoint(checkpoint_path)
@@ -81,7 +81,7 @@ def train(resume: bool):
 def tune():
     config = (
         PPOConfig()
-        .environment(StackedRobotParticleEnv)
+        .environment(RobotParticleEnv)
         .training(
             gamma=0.9,
             lr=ray.tune.grid_search([0.001, 0.0001, 0.00001]),
@@ -117,7 +117,7 @@ def tune():
 def run():
     algo = Algorithm.from_checkpoint(checkpoint_path)
 
-    env = StackedRobotParticleEnv(env_config=dict(render_mode="human"))
+    env = RobotParticleEnv(env_config=dict(render_mode="human"))
     obs, _ = env.reset()
 
     while True:

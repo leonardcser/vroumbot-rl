@@ -58,11 +58,11 @@ class RobotParticleEnv(gym.Env):
         self.max_robots = 1
         self.min_robot_radius = 10
         self.max_robot_radius = 20
-        self.robot_capture_angle = 90
+        self.robot_capture_angle = 45
 
         self.num_particles = None
-        self.min_particles = 5
-        self.max_particles = 5
+        self.min_particles = 1
+        self.max_particles = 2
         self.min_particle_radius = 10
         self.max_particle_radius = 30
 
@@ -77,7 +77,9 @@ class RobotParticleEnv(gym.Env):
         self.action_space = spaces.Box(
             low=0,
             high=1,
-            shape=(self.max_robots * 2,),  # 2 actions per robot (speed, angle)
+            shape=(
+                self.max_robots * 2,
+            ),  # 2 actions per robot (lfeftSpeed, rightSpeed)
             dtype=np.float32,
         )
 
@@ -102,23 +104,19 @@ class RobotParticleEnv(gym.Env):
 
     def step(self, actions):
         for i, robot in enumerate(self.state["robots"]):
-            velocity = actions[i * 2] * 2 - 1  # [0, 1] -> [-1, 1]
-            velocity = (
-                velocity * self.max_forward_speed
-                if velocity >= 0
-                else velocity * self.max_backward_speed
+            left_speed = actions[i * 2] * 2 - 1  # [0, 1] -> [-1, 1]
+            robot["leftSpeed"] = (
+                left_speed * self.max_forward_speed
+                if left_speed >= 0
+                else left_speed * self.max_backward_speed
             )
-            angle = actions[i * 2 + 1] * 2 - 1  # [0, 1] -> [-1, 1]]
-            robot["leftSpeed"] = self.clamp(
-                velocity - (angle * robot["radius"]),
-                -self.max_backward_speed,
-                self.max_forward_speed,
+            right_speed = actions[i * 2 + 1] * 2 - 1  # [0, 1] -> [-1, 1]
+            robot["rightSpeed"] = (
+                right_speed * self.max_forward_speed
+                if right_speed >= 0
+                else right_speed * self.max_backward_speed
             )
-            robot["rightSpeed"] = self.clamp(
-                velocity + (angle * robot["radius"]),
-                -self.max_backward_speed,
-                self.max_forward_speed,
-            )
+
             if math.isclose(robot["leftSpeed"], robot["rightSpeed"], rel_tol=1e-4):
                 robot["leftSpeed"] = robot["rightSpeed"]
             elif math.isclose(robot["leftSpeed"], -robot["rightSpeed"], rel_tol=1e-4):
@@ -135,7 +133,7 @@ class RobotParticleEnv(gym.Env):
         reward = 0
         if self.done:
             reward = -1.0
-        elif all([p["dead"] for p in self.state["particles"]]):
+        elif all([p["dead"] for p in self.state["particles"] if p["active"]]):
             reward = 1.0
             self.done = True
         elif self.last_state:
@@ -143,14 +141,29 @@ class RobotParticleEnv(gym.Env):
                 reward = 0.5
             # Reward robots positively for moving towards particles
             else:
-                for i, robot in enumerate(self.state["robots"]):
-                    if not robot["active"]:
-                        continue
-                    if (
-                        robot["min_dist_to_particle"]
-                        < self.last_state["robots"][i]["min_dist_to_particle"]
-                    ):
-                        reward += 0.005
+                last_dist = min(
+                    [
+                        r["min_dist_to_particle"]
+                        for r in self.last_state["robots"]
+                        if r["active"]
+                    ]
+                )
+                dist = min(
+                    [
+                        r["min_dist_to_particle"]
+                        for r in self.state["robots"]
+                        if r["active"]
+                    ]
+                )
+                reward = (last_dist - dist) / max(self.world_width, self.world_height)
+            #     for i, robot in enumerate(self.state["robots"]):
+            #         if not robot["active"]:
+            #             continue
+            #         if (
+            #             robot["min_dist_to_particle"]
+            #             < self.last_state["robots"][i]["min_dist_to_particle"]
+            #         ):
+            #             reward += 0.005
             if reward == 0:
                 reward = -0.01
 
@@ -553,14 +566,14 @@ class RobotParticleEnv(gym.Env):
                         self.state["robots"][i]["score"] += score
                         self.state["total_score"] += score
                     else:
-                        # self.done = True
-                        robot_next = deepcopy(robot)
-                        self._update_robot(robot_next)
-                        self._update_robot(robot_next)
-                        if self._is_collision(robot_next, particle):
-                            if robot["leftSpeed"] + robot["rightSpeed"] != 0:
-                                self.state["robots"][i]["leftSpeed"] = 0
-                                self.state["robots"][i]["rightSpeed"] = 0
+                        self.done = True
+                        # robot_next = deepcopy(robot)
+                        # self._update_robot(robot_next)
+                        # self._update_robot(robot_next)
+                        # if self._is_collision(robot_next, particle):
+                        #     if robot["leftSpeed"] + robot["rightSpeed"] != 0:
+                        #         self.state["robots"][i]["leftSpeed"] = 0
+                        #         self.state["robots"][i]["rightSpeed"] = 0
             for k in range(i + 1, len(self.state["robots"])):
                 other_robot = self.state["robots"][k]
                 if not other_robot["active"] or self.done:

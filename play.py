@@ -12,20 +12,28 @@ def main():
 
     try:
         while True:
-            velocity = 0.5
-            angle = 0.5
+            left_speed = 0.5
+            right_speed = 0.5
             if pygame.key.get_focused():
                 keys = pygame.key.get_pressed()
                 if keys[pygame.K_a]:
-                    angle = 1
+                    right_speed = 1
                 if keys[pygame.K_d]:
-                    angle = 0
+                    left_speed = 1
                 if keys[pygame.K_w]:
-                    velocity = 1
+                    left_speed = 1
+                    right_speed = 1
                 if keys[pygame.K_s]:
-                    velocity = 0
-            out = env.step(np.array([velocity, angle]))
-            print(out[0])
+                    left_speed = 0
+                    right_speed = 0
+                if keys[pygame.K_q]:
+                    left_speed = 0
+                    right_speed = 1
+                if keys[pygame.K_e]:
+                    left_speed = 1
+                    right_speed = 0
+            out = env.step(np.array([left_speed, right_speed]))
+            print(out[1])
             if out[2] or out[3]:
                 env.reset()
     except KeyboardInterrupt:
