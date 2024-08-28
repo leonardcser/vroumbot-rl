@@ -33,8 +33,8 @@ class RobotParticleEnv(gym.Env):
         self.max_max_backward_speed = 10.0
 
         # Robots and particles settings
-        self.min_robots = 1
-        self.max_robots = 1
+        self.min_robots = 2
+        self.max_robots = 2
         self.min_robot_radius = 10
         self.max_robot_radius = 20
         self.robot_capture_angle = 45
@@ -85,7 +85,7 @@ class RobotParticleEnv(gym.Env):
             angle = actions[i * 2 + 1] * 2 - 1  # [0, 1] -> [-1, 1]]
 
             velocity = (
-                self.max_forward_speed if forwards >= 0.5 else self.max_backward_speed
+                self.max_forward_speed if forwards >= 0.5 else -self.max_backward_speed
             )
             robot["leftSpeed"] = self._clamp(
                 velocity - (angle * robot["radius"]),
@@ -592,19 +592,19 @@ class RobotParticleEnv(gym.Env):
                     self.done = True
                     robot["colliding"] = True
                     other_robot["colliding"] = True
-                    # robot_next = deepcopy(robot)
-                    # other_robot_next = deepcopy(other_robot)
-                    # self._update_robot(robot_next)
-                    # self._update_robot(robot_next)
-                    # self._update_robot(other_robot_next)
-                    # self._update_robot(other_robot_next)
-                    # if self._is_collision(robot_next, other_robot_next):
-                    #     if robot["leftSpeed"] + robot["rightSpeed"] != 0:
-                    #         robot["leftSpeed"] = 0
-                    #         robot["rightSpeed"] = 0
-                    #     if other_robot["leftSpeed"] + other_robot["rightSpeed"] != 0:
-                    #         other_robot["leftSpeed"] = 0
-                    #         other_robot["rightSpeed"] = 0
+                    robot_next = deepcopy(robot)
+                    other_robot_next = deepcopy(other_robot)
+                    self._update_robot(robot_next)
+                    self._update_robot(robot_next)
+                    self._update_robot(other_robot_next)
+                    self._update_robot(other_robot_next)
+                    if self._is_collision(robot_next, other_robot_next):
+                        if robot["leftSpeed"] + robot["rightSpeed"] != 0:
+                            robot["leftSpeed"] = 0
+                            robot["rightSpeed"] = 0
+                        if other_robot["leftSpeed"] + other_robot["rightSpeed"] != 0:
+                            other_robot["leftSpeed"] = 0
+                            other_robot["rightSpeed"] = 0
 
     def _is_collision(self, object1, object2):
         if (

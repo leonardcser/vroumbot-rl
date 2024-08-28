@@ -39,7 +39,7 @@ def train(resume: bool):
             .framework("torch")
             .training(
                 gamma=0.9,
-                lr=0.000025,
+                lr=0.00005,
                 kl_coeff=0.2,
                 entropy_coeff=0.01,
                 model={

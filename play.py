@@ -23,7 +23,8 @@ def main():
                     angle = 1
                 if keys[pygame.K_d]:
                     angle = 0
-            out = env.step(np.array([velocity, angle]))
+            out = env.step(np.array([velocity, angle, 0.5, 0]))
+            print("Observation:", out[0])
             print("Reward:", out[1])
             if out[2] or out[3]:
                 env.reset()
