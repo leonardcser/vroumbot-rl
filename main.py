@@ -38,7 +38,7 @@ def train(resume: bool):
             .env_runners(num_env_runners=1)
             .framework("torch")
             .training(
-                gamma=0.99,
+                gamma=0.9,
                 lr=0.000025,
                 kl_coeff=0.2,
                 entropy_coeff=0.01,

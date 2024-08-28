@@ -56,7 +56,9 @@ class RobotParticleEnv(gym.Env):
         self.action_space = spaces.Box(
             low=0,
             high=1,
-            shape=(self.max_robots * 2,),  # 2 actions per robot (velocity, angle)
+            shape=(
+                self.max_robots * 2,
+            ),  # 2 actions per robot (fowards or backwards, angle)
             dtype=np.float32,
         )
 
@@ -79,13 +81,11 @@ class RobotParticleEnv(gym.Env):
 
     def step(self, actions):
         for i, robot in enumerate(self.state["robots"]):
-            velocity = actions[i * 2] * 2 - 1  # [0, 1] -> [-1, 1]
+            forwards = actions[i * 2]
             angle = actions[i * 2 + 1] * 2 - 1  # [0, 1] -> [-1, 1]]
 
             velocity = (
-                velocity * self.max_forward_speed
-                if velocity >= 0
-                else velocity * self.max_backward_speed
+                self.max_forward_speed if forwards >= 0.5 else self.max_backward_speed
             )
             robot["leftSpeed"] = self._clamp(
                 velocity - (angle * robot["radius"]),
@@ -116,8 +116,6 @@ class RobotParticleEnv(gym.Env):
         observations = self._get_observations()
         assert not np.any(np.isnan(observations))
         assert not np.any(np.isinf(observations))
-        assert np.min(observations) >= 0
-        assert np.max(observations) <= 1
         assert observations.shape == self.observation_space.shape
         truncated = is_time_finished
 
@@ -147,23 +145,26 @@ class RobotParticleEnv(gym.Env):
                         if r["active"]
                     ]
                 )
-                dist_diff = (last_dist - dist) / max(
-                    self.world_width, self.world_height
-                )
-                angle_diff = (
-                    1
-                    - (
-                        min(
-                            [
-                                r["min_angle_diff_to_particle"]
-                                for r in self.state["robots"]
-                                if r["active"]
-                            ]
-                        )
-                        / 180
+                if last_dist == dist:
+                    reward = -0.1
+                else:
+                    dist_diff = (last_dist - dist) / max(
+                        self.world_width, self.world_height
                     )
-                ) / 50
-                reward = dist_diff + angle_diff
+                    angle_diff = (
+                        1
+                        - (
+                            min(
+                                [
+                                    r["min_angle_diff_to_particle"]
+                                    for r in self.state["robots"]
+                                    if r["active"]
+                                ]
+                            )
+                            / 180
+                        )
+                    ) / 50
+                    reward = dist_diff + angle_diff
 
         self.last_state = deepcopy(self.state)
 
@@ -438,6 +439,8 @@ class RobotParticleEnv(gym.Env):
             self.min_max_backward_speed,
             self.max_max_backward_speed,
         )
+
+        obs = np.clip(obs, 0, 1)
         return obs
 
     def _update(self):
