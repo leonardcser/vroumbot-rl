@@ -39,11 +39,11 @@ def train(resume: bool):
             .framework("torch")
             .training(
                 gamma=0.99,
-                lr=0.00025,
+                lr=0.00005,
                 kl_coeff=0.2,
-                entropy_coeff=0.001,
+                entropy_coeff=0.01,
                 model={
-                    "fcnet_hiddens": [256, 256, 512, 512],
+                    "fcnet_hiddens": [256, 256, 256],
                     "fcnet_activation": "relu",
                 },
             )
@@ -121,9 +121,9 @@ def run():
 
     while True:
         action = algo.compute_single_action(obs)
-        obs, reward, terminated, done, info = env.step(action)
+        obs, reward, truncated, done, info = env.step(action)
         print("Reward:", reward)
-        if done or terminated:
+        if done or truncated:
             obs, _ = env.reset()
 
 

@@ -3,6 +3,27 @@ from collections import deque
 import gymnasium as gym
 import numpy as np
 
+from robot_particle_env import RobotParticleEnv
+
+
+class StackedRobotParticleEnv(gym.Env):
+    def __init__(self, env_config):
+        self.env = FrameStack(RobotParticleEnv(env_config), num_stack=4)
+        self.action_space = self.env.action_space
+        self.observation_space = self.env.observation_space
+
+    def reset(self, **kwargs):
+        return self.env.reset(**kwargs)
+
+    def step(self, action):
+        return self.env.step(action)
+
+    def render(self, mode="human"):
+        return self.env.render(mode)
+
+    def close(self):
+        return self.env.close()
+
 
 class FrameStack(gym.Wrapper):
     def __init__(self, env, num_stack):

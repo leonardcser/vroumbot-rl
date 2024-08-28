@@ -1,14 +1,13 @@
 import numpy as np
 import pygame
 
-from robot_particle_env import StackedRobotParticleEnv
+from robot_particle_env import RobotParticleEnv
 
 
 def main():
     pygame.init()
-    env = StackedRobotParticleEnv(env_config=dict(render_mode="human"))
+    env = RobotParticleEnv(env_config=dict(render_mode="human"))
     env.reset()
-    env = env.env
 
     try:
         while True:
