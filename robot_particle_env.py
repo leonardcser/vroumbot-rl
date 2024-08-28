@@ -40,8 +40,8 @@ class RobotParticleEnv(gym.Env):
         self.robot_capture_angle = 45
 
         self.num_particles = None
-        self.min_particles = 1
-        self.max_particles = 1
+        self.min_particles = 2
+        self.max_particles = 2
         self.min_particle_radius = 10
         self.max_particle_radius = 30
 
@@ -56,9 +56,7 @@ class RobotParticleEnv(gym.Env):
         self.action_space = spaces.Box(
             low=0,
             high=1,
-            shape=(
-                self.max_robots * 2,
-            ),  # 2 actions per robot (lfeftSpeed, rightSpeed)
+            shape=(self.max_robots * 2,),  # 2 actions per robot (velocity, angle)
             dtype=np.float32,
         )
 
@@ -69,8 +67,8 @@ class RobotParticleEnv(gym.Env):
                 # 8 * robots: (position (x, y), radius, angle, leftSpeed,
                 #              rightSpeed, colliding, active)
                 self.max_robots * 8
-                # 2 * robots * particles: (distance (x, y))
-                + self.max_robots * self.max_particles * 2
+                # 2 * robots * particles: (distance (x, y), relative angle)
+                + self.max_robots * self.max_particles * 3
                 # 5: particles (position (x, y), radius, dead, active)
                 + self.max_particles * 5
                 # 3: command_time_interval, max_forward_speed, max_backward_speed
@@ -81,17 +79,23 @@ class RobotParticleEnv(gym.Env):
 
     def step(self, actions):
         for i, robot in enumerate(self.state["robots"]):
-            left_speed = actions[i * 2] * 2 - 1  # [0, 1] -> [-1, 1]
-            robot["leftSpeed"] = (
-                left_speed * self.max_forward_speed
-                if left_speed >= 0
-                else left_speed * self.max_backward_speed
+            velocity = actions[i * 2] * 2 - 1  # [0, 1] -> [-1, 1]
+            angle = actions[i * 2 + 1] * 2 - 1  # [0, 1] -> [-1, 1]]
+
+            velocity = (
+                velocity * self.max_forward_speed
+                if velocity >= 0
+                else velocity * self.max_backward_speed
             )
-            right_speed = actions[i * 2 + 1] * 2 - 1  # [0, 1] -> [-1, 1]
-            robot["rightSpeed"] = (
-                right_speed * self.max_forward_speed
-                if right_speed >= 0
-                else right_speed * self.max_backward_speed
+            robot["leftSpeed"] = self._clamp(
+                velocity - (angle * robot["radius"]),
+                -self.max_backward_speed,
+                self.max_forward_speed,
+            )
+            robot["rightSpeed"] = self._clamp(
+                velocity + (angle * robot["radius"]),
+                -self.max_backward_speed,
+                self.max_forward_speed,
             )
 
             if math.isclose(robot["leftSpeed"], robot["rightSpeed"], rel_tol=1e-4):
@@ -364,7 +368,7 @@ class RobotParticleEnv(gym.Env):
             for i, particle in enumerate(self.state["particles"]):
                 if not particle["active"] or particle["dead"]:
                     continue
-                offset = self.max_robots * 8 + i * 2
+                offset = self.max_robots * 8 + i * 3
                 obs[offset] = self._normalize(
                     abs(particle["position"]["x"] - robot["position"]["x"]),
                     0,
@@ -375,9 +379,16 @@ class RobotParticleEnv(gym.Env):
                     0,
                     self.world_height,
                 )
+                obs[offset + 2] = self._normalize(
+                    self._angle_between_two_points(
+                        robot["position"], particle["position"], robot["angle"]
+                    ),
+                    0,
+                    360,
+                )
 
         for i, particle in enumerate(self.state["particles"]):
-            offset = self.max_robots * 8 + self.max_particles * 2 + i * 5
+            offset = self.max_robots * 8 + self.max_particles * 3 + i * 5
             obs[offset + 3] = particle["dead"]
             obs[offset + 4] = particle["active"]
             if not particle["active"] or particle["dead"]:
@@ -392,7 +403,7 @@ class RobotParticleEnv(gym.Env):
                 particle["radius"], self.min_particle_radius, self.max_particle_radius
             )
 
-        offset = self.max_robots * 8 + self.max_particles * 2 + self.max_particles * 5
+        offset = self.max_robots * 8 + self.max_particles * 3 + self.max_particles * 5
         obs[offset] = self._normalize(
             self.command_time_interval,
             self.min_command_time_interval,
@@ -526,17 +537,9 @@ class RobotParticleEnv(gym.Env):
                 if self._is_collision(robot, particle):
                     # Check if the robot is capturing the particle
                     # Robots has angle in degrees
-                    angle_robot_particle = (
-                        math.degrees(
-                            math.atan2(
-                                particle["position"]["y"] - robot["position"]["y"],
-                                particle["position"]["x"] - robot["position"]["x"],
-                            )
-                        )
-                        + 360
-                    ) % 360
-                    angle_diff = abs(angle_robot_particle - robot["angle"])
-                    angle_diff = min(angle_diff, 360 - angle_diff)
+                    angle_diff = self._angle_between_two_points(
+                        robot["position"], particle["position"], robot["angle"]
+                    )
                     if angle_diff <= robot["captureAngle"]:
                         particle["dead"] = True
                         score = math.pi * particle["radius"] ** 2
@@ -582,11 +585,18 @@ class RobotParticleEnv(gym.Env):
             return True
         return False
 
+    def _angle_between_two_points(self, p1, p2, theta):
+        angle = (
+            math.degrees(math.atan2(p2["y"] - p1["y"], p2["x"] - p1["x"])) + 360
+        ) % 360
+        angle_diff = abs(angle - theta)
+        return min(angle_diff, 360 - angle_diff)
+
     def _distance_to_object(self, object1, object2):
         return math.sqrt(
             pow(object1["position"]["x"] - object2["position"]["x"], 2)
             + pow(object1["position"]["y"] - object2["position"]["y"], 2)
         )
 
-    def clamp(self, n, smallest, largest):
+    def _clamp(self, n, smallest, largest):
         return max(smallest, min(n, largest))

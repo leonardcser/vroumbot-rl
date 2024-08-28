@@ -39,11 +39,11 @@ def train(resume: bool):
             .framework("torch")
             .training(
                 gamma=0.99,
-                lr=0.00005,
+                lr=0.000025,
                 kl_coeff=0.2,
                 entropy_coeff=0.01,
                 model={
-                    "fcnet_hiddens": [256, 256, 256],
+                    "fcnet_hiddens": [256, 512, 512],
                     "fcnet_activation": "relu",
                 },
             )
