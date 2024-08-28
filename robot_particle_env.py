@@ -115,6 +115,10 @@ class RobotParticleEnv(gym.Env):
 
         observations = self._get_observations()
         assert not np.any(np.isnan(observations))
+        assert not np.any(np.isinf(observations))
+        assert np.min(observations) >= 0
+        assert np.max(observations) <= 1
+        assert observations.shape == self.observation_space.shape
         truncated = is_time_finished
 
         # Rewards
@@ -143,9 +147,23 @@ class RobotParticleEnv(gym.Env):
                         if r["active"]
                     ]
                 )
-                diff = (last_dist - dist) / max(self.world_width, self.world_height)
-                reward = diff
-                # reward = -(dist / max(self.world_width, self.world_height)) / 10
+                dist_diff = (last_dist - dist) / max(
+                    self.world_width, self.world_height
+                )
+                angle_diff = (
+                    1
+                    - (
+                        min(
+                            [
+                                r["min_angle_diff_to_particle"]
+                                for r in self.state["robots"]
+                                if r["active"]
+                            ]
+                        )
+                        / 180
+                    )
+                ) / 50
+                reward = dist_diff + angle_diff
 
         self.last_state = deepcopy(self.state)
 
@@ -289,6 +307,7 @@ class RobotParticleEnv(gym.Env):
                     "score": 0.0,
                     "colliding": False,
                     "min_dist_to_particle": max(self.world_width, self.world_height),
+                    "min_angle_diff_to_particle": 180,
                     "active": 1 if i < num_robots else 0,
                 }
             )
@@ -384,7 +403,7 @@ class RobotParticleEnv(gym.Env):
                         robot["position"], particle["position"], robot["angle"]
                     ),
                     0,
-                    360,
+                    180,
                 )
 
         for i, particle in enumerate(self.state["particles"]):
@@ -527,6 +546,7 @@ class RobotParticleEnv(gym.Env):
             if not robot["active"] or self.done:
                 continue
             robot["min_dist_to_particle"] = max(self.world_width, self.world_height)
+            robot["min_angle_diff_to_particle"] = 180
             for particle in self.state["particles"]:
                 if not particle["active"] or particle["dead"] or self.done:
                     continue
@@ -534,12 +554,18 @@ class RobotParticleEnv(gym.Env):
                     robot["min_dist_to_particle"],
                     self._distance_to_object(robot, particle),
                 )
+
+                angle_diff = self._angle_between_two_points(
+                    robot["position"], particle["position"], robot["angle"]
+                )
+                robot["min_angle_diff_to_particle"] = min(
+                    robot["min_angle_diff_to_particle"],
+                    angle_diff,
+                )
+
                 if self._is_collision(robot, particle):
                     # Check if the robot is capturing the particle
                     # Robots has angle in degrees
-                    angle_diff = self._angle_between_two_points(
-                        robot["position"], particle["position"], robot["angle"]
-                    )
                     if angle_diff <= robot["captureAngle"]:
                         particle["dead"] = True
                         score = math.pi * particle["radius"] ** 2
